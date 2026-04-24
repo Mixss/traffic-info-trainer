@@ -118,13 +118,16 @@ function newSituation() {
   const refAlt = Math.random() < .5 ? pair[0] : pair[1];
   const tfcAlt = refAlt === pair[0]  ? pair[1] : pair[0];
 
+  /* Speed tuned so crossing (progress ≈ 0.54/1.85 ≈ 0.29) happens ~30 s in.
+     At 60 fps: frames_to_cross = 0.29 / speed  →  30s * 60fps = 1800 frames
+     speed = 0.29 / 1800 ≈ 0.000161  →  use a tight range around that value. */
   S = {
     R,
     ref: { sx: sx1, sy: sy1, heading: h1, alt: refAlt },
     tfc: { sx: sx2, sy: sy2, heading: h2, alt: tfcAlt, ...pick(AC_DB) },
     totalDist : dist * 1.85,
     progress  : 0,
-    speed     : rnd(0.0007, 0.0013),
+    speed     : rnd(0.000145, 0.000175),
   };
 }
 
