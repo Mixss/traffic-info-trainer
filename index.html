@@ -97,20 +97,43 @@ function newSituation() {
   const cx = W / 2,        cy = H / 2;
   const R  = W * 0.43;
 
-  /* Intersection point near centre */
+  /* ── Headings: full 360° spread, all configurations allowed ── */
+  const h1     = rnd(0, Math.PI * 2);
+  /* Any relative angle except nearly identical (avoid overlap < 10°) */
+  const minSep = Math.PI / 18; /* 10° */
+  let spread = rnd(minSep, Math.PI * 2 - minSep);
+  const h2 = h1 + spread;
+
+  /* ── Closest-approach geometry ─────────────────────────────
+     50% chance: paths intersect (CPA ≈ 0)
+     50% chance: paths miss by a random lateral offset (0.5–4 NM)
+     Radar radius = 10 NM → 1 NM = R/10 px                      */
+  const nmToPx = R / 10;
+
+  /* Nominal intersection point near centre of scope */
   const margin = R * 0.28;
   const ix = cx + rnd(-margin, margin);
   const iy = cy + rnd(-margin, margin);
 
-  /* Two approach headings – angular spread 50°–130° */
-  const h1     = rnd(0, Math.PI * 2);
-  const spread = rnd(Math.PI * 5/18, Math.PI * 13/18) * (Math.random() < .5 ? 1 : -1);
-  const h2     = h1 + spread;
+  const willCross = Math.random() < 0.5;
+  /* lateral miss distance in px (0 if crossing) */
+  const missNm = willCross ? 0 : rnd(0.5, 4);
+  const missPx = missNm * nmToPx;
 
-  /* Start positions behind intersection */
+  /* Perpendicular direction to h2 for the lateral offset */
+  const perpH2 = h2 + Math.PI / 2;
+
+  /* Start both aircraft at equal distance before the nominal intersection */
   const dist = R * 0.54;
-  const sx1 = ix - Math.cos(h1) * dist,  sy1 = iy - Math.sin(h1) * dist;
-  const sx2 = ix - Math.cos(h2) * dist,  sy2 = iy - Math.sin(h2) * dist;
+
+  /* ref starts on its approach path */
+  const sx1 = ix - Math.cos(h1) * dist;
+  const sy1 = iy - Math.sin(h1) * dist;
+
+  /* tfc starts laterally shifted so it misses (or hits) the ref's path */
+  const offsetSign = Math.random() < 0.5 ? 1 : -1;
+  const sx2 = ix - Math.cos(h2) * dist + Math.cos(perpH2) * missPx * offsetSign;
+  const sy2 = iy - Math.sin(h2) * dist + Math.sin(perpH2) * missPx * offsetSign;
 
   /* Altitudes differ by exactly 1 000 ft */
   const idx    = Math.floor(Math.random() * (ALTS.length - 1));
@@ -118,7 +141,7 @@ function newSituation() {
   const refAlt = Math.random() < .5 ? pair[0] : pair[1];
   const tfcAlt = refAlt === pair[0]  ? pair[1] : pair[0];
 
-  /* Speed tuned so crossing (progress ≈ 0.29) happens ~30 s in at 60 fps. */
+  /* Speed: crossing/CPA at ~30 s */
   const refAc = pick(AC_DB);
   S = {
     R,
@@ -217,11 +240,11 @@ function drawTfc(x, y, hdg, tfc, cx) {
 
 /* ── Distance line between the two aircraft ────────────────── */
 function drawDistance(rx, ry, tx, ty, R) {
-  /* pixel distance → NM  (radar radius = 20 NM) */
+  /* pixel distance → NM  (radar radius = 10 NM) */
   const dx      = tx - rx;
   const dy      = ty - ry;
   const pxDist  = Math.sqrt(dx * dx + dy * dy);
-  const nm      = pxDist / R * 20;
+  const nm      = pxDist / R * 10;
 
   /* thin dashed grey line */
   ctx.beginPath();
@@ -233,7 +256,7 @@ function drawDistance(rx, ry, tx, ty, R) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  /* label at midpoint, slightly offset perpendicular to the line */
+  /* label at midpoint, offset perpendicular to the line */
   const mx   = (rx + tx) / 2;
   const my   = (ry + ty) / 2;
   const ang  = Math.atan2(dy, dx);
@@ -244,11 +267,9 @@ function drawDistance(rx, ry, tx, ty, R) {
 
   const label = nm.toFixed(1) + ' NM';
   ctx.font         = 'bold 11px "Courier New", monospace';
-  ctx.fillStyle    = 'rgba(200,200,200,0.9)';
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
 
-  /* subtle dark background for readability */
   const tw = ctx.measureText(label).width;
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(lx - tw / 2 - 3, ly - 8, tw + 6, 16);
@@ -343,7 +364,7 @@ function frame(ts) {
     ctx.fillStyle = 'rgba(255,255,0,' + ((i + 1) / trails.tfc.length * 0.45) + ')'; ctx.fill();
   });
 
-  /* Distance line (drawn before aircraft symbols so it sits underneath) */
+  /* Distance line */
   drawDistance(rpos.x, rpos.y, tpos.x, tpos.y, R);
 
   /* Aircraft */
