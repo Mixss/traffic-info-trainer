@@ -118,12 +118,13 @@ function newSituation() {
   const refAlt = Math.random() < .5 ? pair[0] : pair[1];
   const tfcAlt = refAlt === pair[0]  ? pair[1] : pair[0];
 
-  /* Speed tuned so crossing (progress ≈ 0.54/1.85 ≈ 0.29) happens ~30 s in.
+  /* Speed tuned so crossing (progress ≈ 0.54/1.85 �� 0.29) happens ~30 s in.
      At 60 fps: frames_to_cross = 0.29 / speed  →  30s * 60fps = 1800 frames
      speed = 0.29 / 1800 ≈ 0.000161  →  use a tight range around that value. */
+  const refAc = pick(AC_DB);
   S = {
     R,
-    ref: { sx: sx1, sy: sy1, heading: h1, alt: refAlt },
+    ref: { sx: sx1, sy: sy1, heading: h1, alt: refAlt, ...refAc },
     tfc: { sx: sx2, sy: sy2, heading: h2, alt: tfcAlt, ...pick(AC_DB) },
     totalDist : dist * 1.85,
     progress  : 0,
@@ -149,7 +150,7 @@ function headingLine(x, y, hdg, color, len) {
   ctx.stroke();
 }
 
-function drawRef(x, y, hdg, alt) {
+function drawRef(x, y, hdg, ref, cx) {
   const r   = 9;
   const len = 55;
   const G   = '#00ff41';
@@ -168,11 +169,20 @@ function drawRef(x, y, hdg, alt) {
   ctx.arc(x, y, 2.5, 0, Math.PI * 2);
   ctx.fillStyle = G; ctx.fill();
 
-  ctx.font         = 'bold 13px "Courier New", monospace';
+  /* Label: type/wtc above, altitude below — placed left or right like tfc */
+  const onRight = x < cx;
+  ctx.font         = 'bold 12px "Courier New", monospace';
   ctx.fillStyle    = G;
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(fmtAlt(alt), x, y - r - 5);
+  ctx.textBaseline = 'top';
+  if (onRight) {
+    ctx.textAlign = 'left';
+    ctx.fillText(ref.type + '/' + ref.wtc, x + r + 6, y - 12);
+    ctx.fillText(fmtAlt(ref.alt),          x + r + 6, y +  4);
+  } else {
+    ctx.textAlign = 'right';
+    ctx.fillText(ref.type + '/' + ref.wtc, x - r - 6, y - 12);
+    ctx.fillText(fmtAlt(ref.alt),          x - r - 6, y +  4);
+  }
 }
 
 function drawTfc(x, y, hdg, tfc, cx) {
@@ -298,7 +308,7 @@ function frame(ts) {
   });
 
   /* Aircraft */
-  drawRef(rpos.x, rpos.y, S.ref.heading, S.ref.alt);
+  drawRef(rpos.x, rpos.y, S.ref.heading, S.ref, cx);
   drawTfc(tpos.x, tpos.y, S.tfc.heading, S.tfc, cx);
 
   ctx.restore();
