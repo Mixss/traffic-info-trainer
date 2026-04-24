@@ -9,7 +9,7 @@ No installation, no back-end — just open `index.html` (or the GitHub Pages URL
 
 Air traffic controllers and student controllers need to quickly read a radar picture and compose accurate traffic information calls in a standard format:
 
-> *"Traffic, 12 o'clock, 8 miles, Boeing 737, Medium, Flight Level 350, crossing left to right."*
+> *"Traffic, 10 o'clock, 8 miles, crossing left to right, 1000 feet above, type Boeing 737"*
 
 This tool generates randomised two-aircraft scenarios on a synthetic radar scope so you can practise building that mental picture repeatedly without needing a full simulator.
 
