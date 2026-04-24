@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Traffic Info Trainer</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    user-select: none;
+  }
+  #radarWrapper {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas { display: block; }
+  #controls { padding: 8px 0 14px; }
+  button {
+    padding: 10px 44px;
+    background: transparent;
+    color: #00ff41;
+    border: 1px solid #00ff41;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  button:hover  { background: #00ff41; color: #000; }
+  button:active { background: #00cc33; color: #000; }
+</style>
+</head>
+<body>
+<div id="radarWrapper"><canvas id="radar"></canvas></div>
+<div id="controls"><button id="nextBtn">&#9654; Next Situation</button></div>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('radar');
+const ctx    = canvas.getContext('2d');
+
+/* ── Aircraft database ─────────────────────────────────────── */
+const AC_DB = [
+  {type:'B738',wtc:'M'},{type:'A320',wtc:'M'},{type:'A321',wtc:'M'},
+  {type:'B739',wtc:'M'},{type:'B752',wtc:'M'},{type:'B763',wtc:'H'},
+  {type:'B77W',wtc:'H'},{type:'B788',wtc:'H'},{type:'A333',wtc:'H'},
+  {type:'A359',wtc:'H'},{type:'A124',wtc:'H'},{type:'A388',wtc:'J'},
+  {type:'E190',wtc:'M'},{type:'E75L',wtc:'M'},{type:'CRJ9',wtc:'M'},
+  {type:'AT75',wtc:'M'},{type:'DH8D',wtc:'M'},{type:'F100',wtc:'M'},
+  {type:'C172',wtc:'L'},{type:'B734',wtc:'M'},
+];
+
+/* ── Altitude helpers ──────────────────────────────────────── */
+const ALTS = [];
+for (let a = 30; a <= 390; a += 10) ALTS.push(a);
+
+function fmtAlt(h) {
+  return h < 100 ? 'A0' + h : 'FL' + h;
+}
+
+/* ── Utility ───────────────────────────────────────────────── */
+function rnd(a, b)  { return a + Math.random() * (b - a); }
+function pick(arr)  { return arr[Math.floor(Math.random() * arr.length)]; }
+
+/* ── State ─────────────────────────────────────────────────── */
+let S            = null;
+let sweepAngle   = -Math.PI / 2;
+let trails       = { ref: [], tfc: [] };
+let lastTrailTs  = 0;
+
+/* ── Canvas sizing ─────────────────────────────────────────── */
+function resize() {
+  const ctrlH = document.getElementById('controls').offsetHeight || 52;
+  const size  = Math.max(Math.min(window.innerWidth, window.innerHeight - ctrlH - 16), 280);
+  canvas.width  = size;
+  canvas.height = size;
+}
+
+/* ── Generate situation ────────────────────────────────────── */
+function newSituation() {
+  resize();
+  trails = { ref: [], tfc: [] };
+
+  const W  = canvas.width, H = canvas.height;
+  const cx = W / 2,        cy = H / 2;
+  const R  = W * 0.43;
+
+  /* Intersection point near centre */
+  const margin = R * 0.28;
+  const ix = cx + rnd(-margin, margin);
+  const iy = cy + rnd(-margin, margin);
+
+  /* Two approach headings – angular spread 50°–130° */
+  const h1     = rnd(0, Math.PI * 2);
+  const spread = rnd(Math.PI * 5/18, Math.PI * 13/18) * (Math.random() < .5 ? 1 : -1);
+  const h2     = h1 + spread;
+
+  /* Start positions behind intersection */
+  const dist = R * 0.54;
+  const sx1 = ix - Math.cos(h1) * dist,  sy1 = iy - Math.sin(h1) * dist;
+  const sx2 = ix - Math.cos(h2) * dist,  sy2 = iy - Math.sin(h2) * dist;
+
+  /* Altitudes differ by exactly 1 000 ft */
+  const idx    = Math.floor(Math.random() * (ALTS.length - 1));
+  const pair   = [ALTS[idx], ALTS[idx + 1]];
+  const refAlt = Math.random() < .5 ? pair[0] : pair[1];
+  const tfcAlt = refAlt === pair[0]  ? pair[1] : pair[0];
+
+  S = {
+    R,
+    ref: { sx: sx1, sy: sy1, heading: h1, alt: refAlt },
+    tfc: { sx: sx2, sy: sy2, heading: h2, alt: tfcAlt, ...pick(AC_DB) },
+    totalDist : dist * 1.85,
+    progress  : 0,
+    speed     : rnd(0.0007, 0.0013),
+  };
+}
+
+/* ── Aircraft position at progress t ──────────────────────── */
+function acPos(ac, t) {
+  const moved = S.totalDist * t;
+  return { x: ac.sx + Math.cos(ac.heading) * moved,
+           y: ac.sy + Math.sin(ac.heading) * moved };
+}
+
+/* ── Drawing helpers ───────────────────────────────────────── */
+function headingLine(x, y, hdg, color, len) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + Math.cos(hdg) * len, y + Math.sin(hdg) * len);
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 1.5;
+  ctx.setLineDash([]);
+  ctx.stroke();
+}
+
+function drawRef(x, y, hdg, alt) {
+  const r   = 9;
+  const len = 55;
+  const G   = '#00ff41';
+
+  headingLine(x, y, hdg, G, len);
+
+  /* Glow */
+  ctx.shadowColor = G; ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.strokeStyle = G; ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.beginPath();
+  ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = G; ctx.fill();
+
+  ctx.font         = 'bold 13px "Courier New", monospace';
+  ctx.fillStyle    = G;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(fmtAlt(alt), x, y - r - 5);
+}
+
+function drawTfc(x, y, hdg, tfc, cx) {
+  const s   = 9;
+  const len = 55;
+  const Y   = '#ffff00';
+
+  headingLine(x, y, hdg, Y, len);
+
+  /* Glow */
+  ctx.shadowColor = Y; ctx.shadowBlur = 8;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+  ctx.strokeStyle = Y; ctx.lineWidth = 2;
+  ctx.strokeRect(-s, -s, s * 2, s * 2);
+  ctx.restore();
+  ctx.shadowBlur = 0;
+
+  ctx.beginPath();
+  ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = Y; ctx.fill();
+
+  /* Label: place left or right depending on screen side */
+  const onRight = x < cx;
+  ctx.font         = 'bold 12px "Courier New", monospace';
+  ctx.fillStyle    = Y;
+  ctx.textBaseline = 'top';
+  if (onRight) {
+    ctx.textAlign = 'left';
+    ctx.fillText(tfc.type + '/' + tfc.wtc, x + s + 6, y - 12);
+    ctx.fillText(fmtAlt(tfc.alt),          x + s + 6, y +  4);
+  } else {
+    ctx.textAlign = 'right';
+    ctx.fillText(tfc.type + '/' + tfc.wtc, x - s - 6, y - 12);
+    ctx.fillText(fmtAlt(tfc.alt),          x - s - 6, y +  4);
+  }
+}
+
+/* ── Main render loop ──────────────────────────────────────── */
+function frame(ts) {
+  requestAnimationFrame(frame);
+
+  sweepAngle += 0.017;
+  if (sweepAngle > Math.PI * 2) sweepAngle -= Math.PI * 2;
+
+  if (!S) return;
+
+  S.progress += S.speed;
+  if (S.progress >= 1) { S.progress = 0; trails = { ref: [], tfc: [] }; }
+
+  /* Record trails every ~500 ms */
+  if (ts - lastTrailTs > 500) {
+    lastTrailTs = ts;
+    const rp = acPos(S.ref, S.progress);
+    const tp = acPos(S.tfc, S.progress);
+    trails.ref.push({ ...rp });
+    trails.tfc.push({ ...tp });
+    if (trails.ref.length > 5) trails.ref.shift();
+    if (trails.tfc.length > 5) trails.tfc.shift();
+  }
+
+  const W  = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  const R  = S.R;
+
+  /* ── Background ── */
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#000810'; ctx.fillRect(0, 0, W, H);
+
+  /* Radar disk */
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#000d00'; ctx.fill();
+
+  /* Range rings */
+  ctx.strokeStyle = '#004400'; ctx.lineWidth = 0.8;
+  for (let i = 1; i <= 4; i++) {
+    ctx.beginPath(); ctx.arc(cx, cy, R * i / 4, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  /* Crosshair */
+  ctx.strokeStyle = '#003300'; ctx.lineWidth = 0.8;
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath();
+  ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+  ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  /* Sweep sector */
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, R, sweepAngle - 0.5, sweepAngle);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(0,255,65,0.06)'; ctx.fill();
+
+  /* Sweep line */
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(sweepAngle) * R, cy + Math.sin(sweepAngle) * R);
+  ctx.strokeStyle = 'rgba(0,255,65,0.72)'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  /* Outer border */
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.strokeStyle = '#005500'; ctx.lineWidth = 2; ctx.stroke();
+
+  /* ── Clip to radar disk ── */
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R - 1, 0, Math.PI * 2); ctx.clip();
+
+  const rpos = acPos(S.ref, S.progress);
+  const tpos = acPos(S.tfc, S.progress);
+
+  /* Trails */
+  trails.ref.forEach(function(p, i) {
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,255,65,' + ((i + 1) / trails.ref.length * 0.45) + ')'; ctx.fill();
+  });
+  trails.tfc.forEach(function(p, i) {
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,0,' + ((i + 1) / trails.tfc.length * 0.45) + ')'; ctx.fill();
+  });
+
+  /* Aircraft */
+  drawRef(rpos.x, rpos.y, S.ref.heading, S.ref.alt);
+  drawTfc(tpos.x, tpos.y, S.tfc.heading, S.tfc, cx);
+
+  ctx.restore();
+}
+
+/* ── Init ──────────────────────────────────────────────────── */
+document.getElementById('nextBtn').addEventListener('click', newSituation);
+window.addEventListener('resize', newSituation);
+
+newSituation();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
